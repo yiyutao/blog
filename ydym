@@ -1,0 +1,90 @@
+# -*- coding: utf-8 -*-
+import os
+import re
+
+import scrapy
+from scrapy.selector import Selector
+
+
+class YdymSpider(scrapy.Spider):
+    source = set()
+
+    name = 'ydym'
+    page_name = ''
+    allowed_domains = ['svip.iocoder.cn']
+    base_file_path = 'D:\\ydym1\\'
+    base_url = "http://svip.iocoder.cn"
+    start_urls = [base_url + '/index']
+    cookies = {'Hm_lpvt_8a0e6ede16424b5310cf2f09adb4e82b': '1592990512',
+               'Hm_lpvt_9e70e3362807c1bd185a79655b307027': '1579073393',
+               'Hm_lvt_8a0e6ede16424b5310cf2f09adb4e82b': '1592795800',
+               'Hm_lvt_9e70e3362807c1bd185a79655b307027': '1579073393',
+               '_ga': 'GA1.2.339132974.1579073400'}
+
+    # 开始爬虫
+    def start_requests(self):
+        for url in self.start_urls:
+            yield scrapy.Request(url=url, cookies=self.cookies, callback=self.index_parse)
+
+    # 爬取首页所有模块
+    def index_parse(self, response):
+        self.get_url(response.text)
+        element_a = response.xpath('//div[@class="article-entry"]/ul/li/a').getall()
+        for element in element_a:
+            # 每个模块的url
+            url = self.base_url + Selector(text=element).xpath('//a/@href').get()
+            # 每个模块的名称
+            item_name = Selector(text=element).xpath('//a/text()').get()
+            # 创建模块文件夹
+            file_path = self.base_file_path + item_name
+            self.mkdir(file_path)
+            request = scrapy.Request(url=url, cookies=self.cookies, callback=self.item_parse)
+            request.meta['file_path'] = file_path
+            yield request
+
+    # 进入每个模块，获取每个模块的每个章节
+    def item_parse(self, response):
+        self.get_url(response.text)
+        element_a = response.xpath('//a[@class="archive-article-title"]').getall()
+        for element in element_a:
+            # 当前页面的url
+            url = self.base_url + Selector(text=element).xpath('//a/@href').get()
+            # 当前页面的名称
+            page_name = Selector(text=element).xpath('//a/text()').get()
+            # 给当前页面创建文件
+            file_path = response.meta['file_path']
+            file_name = file_path + '/' + page_name + '.html'
+            request = scrapy.Request(url=url, cookies=self.cookies, callback=self.page_parse)
+            request.meta['file_path'] = file_path
+            request.meta['file_name'] = file_name
+            yield request
+
+    # 进入每个章节，爬取每个章节的内容
+    def page_parse(self, response):
+        self.get_url(response.text)
+        file_name = response.meta['file_name']
+        file_path = response.meta['file_path']
+        self.mkdir(file_path + '/static')
+        # with open(file_name, 'wb') as f:
+        #     f.write(response.body)
+
+    def get_url(self, html):
+        reg_resource_type = r'(?:href|src|data\-original|data\-src)=["\'](.+?\.(' \
+                            r'?:js|css|jpg|jpeg|png|gif|svg|ico|ttf|woff2))[a-zA-Z0-9\?\=\.]*["\'] '
+        reg_resource = re.compile(reg_resource_type, re.S)
+        content_list = re.split(r'\s+', html)
+        for line in content_list:
+            res_list = reg_resource.findall(line)
+            if res_list is not None:
+                self.source.add(res_list)
+
+    @staticmethod
+    def mkdir(path):
+        folder = os.path.exists(path)
+
+        if not folder:  # 判断是否存在文件夹如果不存在则创建为文件夹
+            os.makedirs(path)  # makedirs 创建文件时如果路径不存在会创建这个路径
+            print("---  new folder...  ---")
+            print("---  OK  ---")
+        else:
+            print("---  There is this folder!  ---")
